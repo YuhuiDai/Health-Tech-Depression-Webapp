@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css">
+    <link href='http://fonts.googleapis.com/css?family=Open+Sans:300,600' rel='stylesheet' type='text/css'>
+    <script data-require="jquery@*" data-semver="2.0.3" src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+    <script src="https://d3js.org/d3.v4.min.js"></script>
+    <script data-require="jqFhir@0.0.5" data-semver="0.0.5" src="https://cdn.rawgit.com/FHIR/fhir.js/v0.0.5/dist/jqFhir.js"></script>
+
+    <title>Depression FHIR App</title>
+    <style type="text/css">
+        @import url('https://fonts.googleapis.com/css?family=Lato:200,300,400');
+        body {
+            font-family:'Lato';
+            background: #dddddd;
+            font-weight: 300;
+            margin: 0;
+            padding: 0;
+        }
+        .container.landing-page {
+            position: relative;
+            padding: 100px 15px;
+            text-align: center;
+        }
+
+    </style>
+</head>
+
+
+
+<body>
+<!--<svg width="960" height="500"></svg>-->
+
+<section class="main">
+    <div class="container landing-page">
+        <div class="row">
+            <div class="col-lg-6 col-md-offset-3">
+                <h2 style="margin-bottom: 100px">Depression Data</h2>
+            </div>
+        </div>
+
+        <div class="row">
+
+            <div class="col-lg-6" id="gender_pie">
+                <h4 style="margin-bottom: 40px">Male Female Ratio</h4>
+                <div id = "pie"></div>
+            </div>
+            <div class="col-lg-6" id="age_pie">
+                <h4 style="margin-bottom: 40px">Age Distribution</h4>
+                <div id="pie2" style="margin-left: 60px;"></div>
+            </div>
+
+        </div>
+    </div>
+</section>
+
+<script>
+    // Set up a client to talk to an un-authenticated FHIR server
+    let client = jqFhir({
+            baseUrl: 'https://r2.smarthealthit.org',
+            auth: {user: 'client', pass: 'secret'}
+    });
+
+    let patientIDs = new Set();
+    let male = 0;
+    let female = 0;
+    let ages = [];
+
+    client.search(
+        {type: "Condition",
+            query:
+                {code:
+                        {$or:
+                                [41006004, 35489007, 79298009, 15639000, 18818009]
+                        }
+                }
+    }).then(function (data) {
+
+        // console.log(data);
+        for (let i=0; i< data.entry.length; i++)
+            patientIDs.add((data.entry[i].resource.patient.reference).split("/")[1]);
+
+        for (const patientId of patientIDs) {
+            fetch_patient(patientId);
+        }
+        setTimeout(
+            function(){
+                display_gender(male, female);
+                display_age(ages);
+                console.log(female);
+                console.log(male);
+                console.log(ages);
+            }, 500);
+
+
+    });
+
+    function fetch_patient(patientId) {
+        client.read({
+            id: 'Patient/' + patientId
+        }).then(function(p) {
+            console.log(p);
+            if (p.content.gender == 'female')
+                female += 1;
+            else
+                male += 1;
+
+            let age = 2019 - p.content.birthDate.split("-")[0];
+            ages.push(age);
+        });
+
+    }
+
+    function display_gender (male, female) {
+        let data = [{"topic":"MALE","num":male, "c":"rgba(72,112,255,0.7)"},
+            {"topic":"FEMALE","num":female, "c":"rgba(255,139,139,0.7)"}];
+
+        let sum = male + female;
+
+        width = 300;
+        height = 300;
+        radius = Math.min(width-100,height-100)/2;
+
+        let arc = d3.arc().outerRadius(55).innerRadius(0);
+
+        let a= width/2 - 20;
+        let b= height/2 - 90;
+        let svg = d3.select("#pie").append("svg")
+            .attr("viewBox", "0 0 " + (width-50) + " " + height/2)
+            .attr("preserveAspectRatio", "xMidYMid meet")
+            .append("g")
+            .attr("transform","translate("+a+","+b+")");
+
+
+        div = d3.select("body").append("div").attr("class", "tooltip");
+
+        let pie = d3.pie()
+            .sort(null)
+            .startAngle(1.0*Math.PI)
+            .endAngle(3.0*Math.PI)
+            .value(function(d){return d.num;});
+
+
+        let g = svg.selectAll(".arc")
+            .data(pie(data))
+            .enter().append("g")
+            .attr("class","arc")
+            .attr("d", arc)
+            .on("mousemove",function(d){
+                var mouseVal = d3.mouse(this);
+                div.style("display","none");
+                div.html(d.data.topic+"</br>"+((d.data.num/sum)*100).toFixed(1)+"%")
+                    .style("left", (d3.event.pageX+12) + "px")
+                    .style("top", (d3.event.pageY-10) + "px")
+                    .style("opacity", 1)
+                    .style("display","block");
+            })
+            .on("mouseout",function(){div.html(" ").style("display","none");});
+
+
+
+        g.append("path")
+            .style("fill","transparent")
+            .attr("d", arc)
+
+            .transition().delay(function(d,i) {return i * 400;}).duration(400)
+
+            .attrTween('d', function(d) {
+                var i = d3.interpolate(d.startAngle+0.1, d.endAngle);
+                return function(t) {
+                    d.endAngle = i(t);
+                    return arc(d);
+                }})
+            .attr("d",arc)
+            .style("fill",function(d){return d.data.c;});
+    }
+
+    function display_age(ages) {
+
+        let data = [
+            {"age":"< 18","num":0, "c":"rgba(72,112,255,0.7)"},
+            {"age":"18 to 30","num":0, "c":"rgba(0,166,214,0.7)"},
+            {"age":"31 to 40","num":0, "c":"rgba(0,110,199,0.7)"},
+            {"age":"41 to 50","num":0, "c":"rgba(0,76,151,0.7)"},
+            {"age":"51 to 65","num":0, "c":"rgba(0,43,100,0.7)"},
+            {"age":"65 +","num":0, "c":"rgba(170,170,170,0.7)"}
+            ];
+        for (const age of ages) {
+            if (age < 18) data[0]["num"] += 1;
+            else if (age < 31) data[1]["num"] += 1;
+            else if (age < 41) data[2]["num"] += 1;
+            else if (age < 51) data[3]["num"] += 1;
+            else if (age < 66) data[4]["num"] += 1;
+            else data[5]["num"] += 1;
+        }
+        console.log(data);
+        let sum = 0;
+        for (const d of data) {
+            sum += d.num;
+        }
+
+        width = 300;
+        height = 300;
+        radius = Math.min(width-100,height-100)/2;
+
+        let arc = d3.arc().outerRadius(60).innerRadius(0);
+
+        let a= width/2 - 20;
+        let b= height/2 - 90;
+        let svg = d3.select("#pie2").append("svg")
+            .attr("viewBox", "0 0 " + (width-50) + " " + height/2)
+            .attr("preserveAspectRatio", "xMidYMid meet")
+            .append("g")
+            .attr("transform","translate("+a+","+b+")");
+
+
+        div = d3.select("body").append("div").attr("class", "tooltip");
+
+        let pie = d3.pie()
+            .sort(null)
+            .startAngle(1.0*Math.PI)
+            .endAngle(3.0*Math.PI)
+            .value(function(d){return d.num;});
+
+
+        let g = svg.selectAll(".arc")
+            .data(pie(data))
+            .enter().append("g")
+            .attr("class","arc")
+            .attr("d", arc)
+            .on("mousemove",function(d){
+                var mouseVal = d3.mouse(this);
+                div.style("display","none");
+                div.html(d.data.age+"</br>"+((d.data.num/sum)*100).toFixed(1)+"%")
+                    .style("left", (d3.event.pageX+12) + "px")
+                    .style("top", (d3.event.pageY-10) + "px")
+                    .style("opacity", 1)
+                    .style("display","block");
+            })
+            .on("mouseout",function(){div.html(" ").style("display","none");});
+
+
+
+        g.append("path")
+            .style("fill","transparent")
+            .attr("d", arc)
+
+            .transition().delay(function(d,i) {return i * 400;}).duration(400)
+
+            .attrTween('d', function(d) {
+                var i = d3.interpolate(d.startAngle+0.1, d.endAngle);
+                return function(t) {
+                    d.endAngle = i(t);
+                    return arc(d);
+                }})
+            .attr("d",arc)
+            .style("fill",function(d){return d.data.c;});
+    }
+
+</script>
+</body>
+
+</html>
